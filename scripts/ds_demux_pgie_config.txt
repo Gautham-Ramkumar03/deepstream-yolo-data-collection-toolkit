@@ -1,0 +1,26 @@
+[property]
+gpu-id=0
+net-scale-factor=0.0039215697906911373
+model-color-format=0
+# Specify your YOLOv8 model paths
+onnx-file=
+model-engine-file=
+labelfile-path=../utils/labels.txt
+batch-size=1
+process-mode=1
+network-mode=2
+num-detected-classes=80
+interval=0
+gie-unique-id=1
+maintain-aspect-ratio=1
+symmetric-padding=1
+# YOLOv8 specific parameters
+parse-bbox-func-name=NvDsInferParseYolo
+custom-lib-path=../nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so
+# YOLOv8 specific output layer names
+output-blob-names=output
+
+[class-attrs-all]
+pre-cluster-threshold=0.25
+topk=20
+nms-iou-threshold=0.45
