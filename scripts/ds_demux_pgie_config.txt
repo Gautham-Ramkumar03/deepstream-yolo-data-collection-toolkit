@@ -3,8 +3,8 @@ gpu-id=0
 net-scale-factor=0.0039215697906911373
 model-color-format=0
 # Specify your YOLOv8 model paths
-onnx-file=
-model-engine-file=
+onnx-file=../models/yolo11m.pt.onnx
+model-engine-file=/home/achu503/flo/dev/working/models/yolo11m.pt.onnx_b3_gpu0_fp16.engine
 labelfile-path=../utils/labels.txt
 batch-size=1
 process-mode=1

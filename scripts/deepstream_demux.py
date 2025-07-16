@@ -27,7 +27,7 @@ import numpy as np
 from threading import Thread, Lock, Event
 
 # Import the structured saver
-from structured_saver_1 import InferenceSaver
+from structured_saver import InferenceSaver
 # Import the frame grabber
 from frame_grabber import FrameGrabber
 
