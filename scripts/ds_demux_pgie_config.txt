@@ -4,7 +4,10 @@ net-scale-factor=0.0039215697906911373
 model-color-format=0
 # Specify your YOLOv8 model paths
 onnx-file=../models/yolo11m.pt.onnx
-model-engine-file=/home/achu503/flo/dev/working/models/yolo11m.pt.onnx_b3_gpu0_fp16.engine
+# The TensorRT engine is auto-generated on the first run. Once it exists,
+# uncomment the line below and point it at the generated file to skip rebuilding
+# (the b{N} suffix = camera count the engine was built for).
+# model-engine-file=../models/yolo11m.pt.onnx_b3_gpu0_fp16.engine
 labelfile-path=../utils/labels.txt
 batch-size=1
 process-mode=1

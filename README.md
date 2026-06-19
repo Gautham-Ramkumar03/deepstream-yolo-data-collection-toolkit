@@ -1,272 +1,265 @@
-# DeepStream Data Collection Pipeline
+<div align="center">
 
-A production-ready, real-time data collection pipeline built on NVIDIA DeepStream 7.0 for multi-camera YOLO-based object detection. This pipeline is designed for easy model replacement and supports both raw data collection and YOLO dataset generation.
+# 🎥 DeepStream YOLO Data Collection Toolkit
+
+**Turn live cameras into clean, organized datasets — a production-grade NVIDIA DeepStream pipeline for multi-camera YOLO detection and automatic data collection.**
+
+Runs real-time YOLO inference on multiple cameras, captures *clean* frames (before any overlay), and saves them into session-rotated folders as raw detections or ready-to-train YOLO datasets.
+
+[![DeepStream](https://img.shields.io/badge/NVIDIA-DeepStream%207.0%2B-76B900.svg?logo=nvidia&logoColor=white)](https://developer.nvidia.com/deepstream-sdk)
+[![Jetson](https://img.shields.io/badge/Platform-Jetson%20%7C%20dGPU-76B900.svg?logo=nvidia&logoColor=white)](https://developer.nvidia.com/embedded-computing)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![YOLO](https://img.shields.io/badge/Ultralytics-YOLOv8%20%7C%20YOLO11-purple.svg)](https://docs.ultralytics.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+</div>
+
+---
+
+## Why this exists
+
+Collecting real-world training data from deployed cameras is tedious and error-prone: you
+have to record video, run inference offline, crop/clean frames, label them, and keep
+everything organized per camera and per session. Do it live on an edge device and you also
+fight memory copies, overlay artifacts baked into your images, and long-running stability.
+
+This toolkit does it all **in one real-time pipeline**. It runs YOLO on every camera,
+grabs **clean frames before the bounding-box overlay is drawn**, deduplicates near-identical
+detections, and writes everything into **time-rotated session folders** — either as raw
+per-class detections or as a directly-trainable YOLO dataset (`images/` + `labels/`).
 
 ## ✨ Features
 
-- **Multi-Camera Support**: Process multiple USB/CSI cameras simultaneously
-- **Model Flexibility**: Easy replacement of YOLOv8 models with minimal configuration changes
-- **Dual Output Modes**: Raw frame collection or YOLO-format dataset generation
-- **Session-Based Organization**: Time-based folder rotation for organized data management
-- **Clean Frame Extraction**: Captures frames before DeepStream overlay processing
-- **System Monitoring**: Automatic system metrics logging (with `jtop` on Jetson)
-- **Similarity Filtering**: IoU-based detection filtering to reduce redundant saves
-- **Bounding Box Visualization**: Optional bounding box overlay on saved images
+- **Multi-camera** — process several USB/CSI cameras at once via `nvstreammux` + `nvstreamdemux`.
+- **Clean frame capture** — a `tee` branch taps the stream *before* `nvosd`, so saved images have no overlay burned in.
+- **Two output modes** — raw per-camera/per-class detections, or YOLO-format dataset (`--dataset`).
+- **Session rotation** — a dedicated timer thread rotates output into fresh timestamped folders and safely closes/reopens all files mid-run.
+- **Similarity filtering** — IoU-based detection memory skips redundant near-duplicate saves.
+- **System telemetry** — logs CPU/GPU/RAM/power/thermal metrics on Jetson (via `jtop`).
+- **Model-agnostic** — swap in any YOLOv8/YOLO11 model with a config change; bundled DeepStream YOLO parser included.
+- **Optional bounding boxes** — `--bbox` overlays boxes on saved images when you want them.
+
+## 🏗️ Pipeline architecture
+
+```
+ cam0 ─┐
+ cam1 ─┤  v4l2src → videoconvert → nvvideoconvert
+ ...  ─┘            │
+                    ▼
+              nvstreammux ─► nvinfer (PGIE / YOLO) ─► nvstreamdemux
+                                                          │  (per stream)
+                          ┌───────────────────────────────┴───────────────┐
+                          ▼                                                 ▼
+                    nvvideoconvert ─► tee ───────────────┐                 ...
+                                       │                 │
+                  ┌────────────────────┘                 └──────────────────────┐
+                  ▼  (display branch)                       ▼  (clean branch)
+            nvdsosd ─► sink   ◄── detection probe      nvvideoconvert(RGBA)
+            (overlay)         (reads metadata,          ─► capsfilter ─► fakesink
+                               saves detections)            ▲
+                                                      FrameGrabber probe
+                                                   (captures CLEAN frames)
+```
+
+The detection probe on the OSD sink pad reads YOLO metadata, while the **FrameGrabber**
+pulls the matching *clean* RGBA frame from the parallel branch — so detection data and
+overlay-free images stay in sync.
+
+## 📂 Repository structure
+
+```text
+.
+├── scripts/
+│   ├── deepstream_demux.py        # main multi-camera pipeline + detection probe
+│   ├── frame_grabber.py           # thread-safe clean-frame capture from NVMM
+│   ├── structured_saver.py        # session rotation, IoU dedup, CSV/YOLO saving, telemetry
+│   └── ds_demux_pgie_config.txt   # nvinfer (PGIE) configuration
+├── nvdsinfer_custom_impl_Yolo/    # DeepStream YOLO output parser (C++/CUDA) + Makefile
+├── utils/
+│   ├── export_yoloV8.py           # export a YOLOv8/YOLO11 .pt model to DeepStream ONNX
+│   └── labels.txt                 # class labels (COCO 80 by default)
+├── common/                        # DeepStream helpers (bus_call, FPS, platform_info, utils)
+├── models/                        # place your .pt / .onnx / .engine here (see models/README.md)
+└── README.md
+```
 
 ## 🔧 Requirements
 
-### Hardware
-- NVIDIA Jetson (Nano, Xavier, Orin) or dGPU-enabled system
-- USB or CSI cameras
-- Sufficient storage for data collection
+**Hardware:** NVIDIA Jetson (Nano / Xavier / Orin) or a dGPU system, plus USB/CSI cameras.
 
-### Software
-- NVIDIA DeepStream 7.0+
-- Python 3.8+
-- OpenCV
-- PyTorch (for model conversion)
-- Ultralytics YOLOv8
+**Software:**
+- NVIDIA DeepStream **7.0+** (with `pyds` Python bindings and GStreamer)
+- Python **3.8+**, OpenCV, NumPy
+- For model export: PyTorch, Ultralytics, ONNX
+- Optional (Jetson telemetry): `jetson-stats` (`jtop`)
 
-### Python Dependencies
 ```bash
 pip install opencv-python numpy ultralytics torch torchvision onnx
-# For Jetson system monitoring (optional)
-pip install jetson-stats
+pip install jetson-stats   # optional, Jetson only
 ```
 
-## 🚀 Quick Start
+## 🚀 Quick start
 
-### 1. Clone Repository
+### 1. Clone
+
 ```bash
-git clone https://github.com/your-username/deepstream-data-collection-pipeline.git
-cd deepstream-data-collection-pipeline
+git clone https://github.com/Gautham-Ramkumar03/deepstream-yolo-data-collection-toolkit.git
+cd deepstream-yolo-data-collection-toolkit
 ```
 
-### 2. Run with Default YOLOv8m Model
+### 2. Build the YOLO output parser
+
+The pipeline loads a custom DeepStream parser (`custom-lib-path` in the config). Build it
+once for your platform:
+
+```bash
+cd nvdsinfer_custom_impl_Yolo
+# Point CUDA_VER at your install (e.g. 12.2 on Orin / DeepStream 7.0)
+CUDA_VER=12.2 make
+cd ..
+```
+
+This produces `nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so`.
+
+### 3. Add a model
+
+See **[models/README.md](models/README.md)** for the full walkthrough. In short:
+
+```bash
+cd models
+wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt
+cd ../utils
+python3 export_yoloV8.py -w ../models/yolo11m.pt --opset 11 --dynamic
+```
+
+The PGIE config (`scripts/ds_demux_pgie_config.txt`) already points at
+`../models/yolo11m.pt.onnx` with 80 COCO classes — adjust if you use a different model.
+
+### 4. Run
+
 ```bash
 cd scripts
-python3 deepstream_demux.py -i /dev/video0 /dev/video1
-```
 
-### 3. Enable Dataset Mode (YOLO Format)
-```bash
-python3 deepstream_demux.py -i /dev/video0 --dataset
-```
-
-### 4. Enable Bounding Box Visualization
-```bash
-python3 deepstream_demux.py -i /dev/video0 --bbox
-```
-
-## 🔄 Using Your Own YOLOv8 Model
-
-### Step 1: Convert Model to ONNX
-```bash
-cd utils
-python3 export_yoloV8.py -w /path/to/your/model.pt --opset 11 --dynamic
-```
-
-### Step 2: Move ONNX File
-```bash
-mv your-model.pt.onnx ../models/
-```
-
-### Step 3: Update Configuration
-Edit ds_demux_pgie_config.txt:
-
-**Initial run (before engine generation):**
-```ini
-[property]
-onnx-file=/home/user/path/to/deepstream-data-collection-pipeline/models/your-model.pt.onnx
-# Comment out model-engine-file for first run
-# model-engine-file=...
-num-detected-classes=80  # Update if different
-```
-
-**After first run (engine file generated):**
-```ini
-[property]
-onnx-file=/home/user/path/to/deepstream-data-collection-pipeline/models/your-model.pt.onnx
-model-engine-file=/home/user/path/to/deepstream-data-collection-pipeline/models/your-model.pt.onnx_b3_gpu0_fp16.engine
-num-detected-classes=80  # Update if different
-```
-
-### Step 4: Update Class Configuration (if needed)
-
-If your model has different number of classes than COCO (80), update:
-
-**In structured_saver_1.py:**
-```python
-# Update CLASS_NAMES dictionary with your classes
-CLASS_NAMES = {
-    0: "your_class_1",
-    1: "your_class_2",
-    # ... add all your classes
-}
-
-# Update SAVE_CLASSES if you want to filter which classes to save
-SAVE_CLASSES = CLASS_NAMES.copy()  # Save all classes
-```
-
-**In ds_demux_pgie_config.txt:**
-```ini
-num-detected-classes=YOUR_CLASS_COUNT
-```
-
-## ⚙️ Configuration
-
-### Multi-Camera Engine Building
-**Important**: Build your TensorRT engine with the maximum number of cameras you intend to use:
-
-```bash
-# For up to 5 cameras, run first with 5 camera inputs
-python3 deepstream_demux.py -i /dev/video0 /dev/video1 /dev/video2 /dev/video3 /dev/video4
-```
-
-A model built for 5 cameras can run with fewer cameras, but not vice versa.
-
-### Session Rotation
-Modify session rotation interval in structured_saver_1.py:
-```python
-class SessionManager:
-    def __init__(self, base_dir="data", rotation_interval=300):  # 300 seconds = 5 minutes
-```
-
-### Detection Filtering
-Configure IoU-based similarity filtering:
-```python
-inference_saver = InferenceSaver(
-    base_dir=output_dir,
-    enable_bbox_similarity_filtering=True,
-    iou_threshold=0.5,      # Similarity threshold
-    memory_seconds=30,      # Memory duration
-)
-```
-
-## 🏷️ Flags & Options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-i, --input` | Camera device paths (required) | None |
-| `--bbox` | Enable bounding box drawing on saved images | Disabled |
-| `--dataset` | Enable YOLO dataset format output | Disabled |
-
-### Usage Examples
-```bash
 # Single camera, raw data collection
 python3 deepstream_demux.py -i /dev/video0
 
-# Multiple cameras with bounding boxes
-python3 deepstream_demux.py -i /dev/video0 /dev/video1 --bbox
+# Multiple cameras
+python3 deepstream_demux.py -i /dev/video0 /dev/video1
 
-# Dataset generation mode
+# YOLO dataset mode (images/ + labels/)
 python3 deepstream_demux.py -i /dev/video0 --dataset
 
-# All features enabled
-python3 deepstream_demux.py -i /dev/video0 /dev/video1 --bbox --dataset
+# Draw bounding boxes on saved images
+python3 deepstream_demux.py -i /dev/video0 --bbox
 ```
 
-## 📁 Output Structure
+> **First run builds the TensorRT engine** (can take a few minutes). Build it with the
+> **maximum** number of cameras you intend to use — an engine built for 5 cameras runs with
+> fewer, but not vice-versa. After it's generated, uncomment `model-engine-file` in the
+> config to skip rebuilding.
 
-### Default Mode (Raw Data Collection)
+## 🏷️ Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-i, --input` | Camera device path(s), e.g. `/dev/video0` (one or more) | *required* |
+| `--dataset` | Output a YOLO-format dataset (`images/` + `labels/`) instead of per-class folders | off |
+| `--bbox` | Draw bounding boxes on saved images | off |
+
+## ⚙️ Configuration
+
+A few behaviors are set in code (tune them to your needs):
+
+**Session rotation interval** — in `scripts/structured_saver.py`, `SessionManager`:
+
+```python
+class SessionManager:
+    def __init__(self, base_dir="data", rotation_interval=15):  # seconds; raise for production (e.g. 300)
+```
+
+A dedicated timer thread rotates to a new timestamped session at this interval and safely
+closes/reopens all CSV and metrics files.
+
+**Similarity (IoU) filtering** — where `InferenceSaver` is created in
+`scripts/deepstream_demux.py`:
+
+```python
+inference_saver = InferenceSaver(
+    base_dir="data",
+    enable_bbox_similarity_filtering=True,
+    iou_threshold=0.5,     # higher = stricter "duplicate" definition
+    memory_seconds=30,     # how long a detection is remembered
+)
+```
+
+**Custom classes** — if your model isn't COCO-80, update `CLASS_NAMES` (and `SAVE_CLASSES`)
+in `scripts/structured_saver.py`, set `num-detected-classes` in the PGIE config, and replace
+`utils/labels.txt`.
+
+## 📁 Output structure
+
+### Default mode (raw collection)
 ```
 data/
-├── MM-DD-YY-HH-MM-SS-fff/          # Session timestamp
-│   ├── cam0/                        # Camera 0 data
-│   │   ├── person/                  # Per-class organization
-│   │   │   ├── images/              # Detection images
-│   │   │   └── metadata.csv         # Detection metadata
-│   │   └── detections/              # Combined detections
-│   │       ├── images/              # Multi-object frames
-│   │       └── all_detections.csv   # Combined metadata
-│   ├── cam1/                        # Camera 1 data
-│   └── system_metrics.csv           # System performance metrics
+└── MM-DD-YY-HH-MM-SS-fff/        # session timestamp
+    ├── cam0/
+    │   ├── person/
+    │   │   ├── images/
+    │   │   └── metadata.csv
+    │   └── detections/           # combined multi-object frames
+    │       ├── images/
+    │       └── all_detections.csv
+    ├── cam1/
+    └── system_metrics.csv        # Jetson telemetry (if jtop available)
 ```
 
-### Dataset Mode (YOLO Format)
+### Dataset mode (`--dataset`)
 ```
 data/
-├── MM-DD-YY-HH-MM-SS-fff/          # Session timestamp
-│   ├── images/                      # All detection images
-│   │   ├── timestamp_s0_f1234.jpg   # Frame images
-│   │   └── ...
-│   ├── labels/                      # YOLO format labels
-│   │   ├── timestamp_s0_f1234.txt   # Corresponding annotations
-│   │   └── ...
-│   └── system_metrics.csv           # System performance metrics
+└── MM-DD-YY-HH-MM-SS-fff/
+    ├── images/                   # clean frames
+    │   └── <ts>_s0_f1234.jpg
+    ├── labels/                   # YOLO labels (one per image)
+    │   └── <ts>_s0_f1234.txt
+    └── system_metrics.csv
 ```
 
-### CSV Metadata Fields
-```csv
-timestamp,date,time,stream_id,frame_num,obj_id,class_id,class_name,left,top,width,height,confidence
+### Detection CSV fields
+```
+timestamp, date, time, stream_id, frame_num, obj_id, class_id, class_name,
+left, top, width, height, confidence
 ```
 
-## 🔧 Troubleshooting & Notes
+## 🛠️ Troubleshooting
 
-### Common Issues
+- **`libnvdsinfer_custom_impl_Yolo.so` not found** — build the parser (step 2) with the right `CUDA_VER`.
+- **Engine generation fails** — make sure the ONNX path in the config is correct and there's enough GPU memory; first build is slow.
+- **Black / missing frames** — check camera permissions and device paths; the toolkit falls back to a black frame and logs a warning.
+- **No system metrics** — `jtop` is Jetson-only and optional; metrics are skipped if unavailable.
+- **Performance** — sinks run with `sync=0` for throughput; use FP16 on Jetson and pick a model size that fits your device (see models/README.md).
 
-**Engine File Generation Failed:**
-- Ensure ONNX model path is absolute in config file
-- Check that model is compatible with your DeepStream version
-- Verify sufficient GPU memory for model loading
+## 🧩 Development
 
-**Frame Extraction Issues:**
-- Confirmed working on Jetson platforms with DeepStream 7.0
-- Frame extraction uses NVIDIA's recommended NVMM memory approach
-- If frames appear black, check camera permissions and device paths
-
-**Performance Optimization:**
-- Disable sync on sinks for maximum throughput: `sink.set_property("sync", 0)`
-- Adjust batch timeout in config: `MUXER_BATCH_TIMEOUT_USEC = 33000`
-- Use appropriate TensorRT precision (FP16 recommended for Jetson)
-
-### Multi-Camera Notes
-- Each camera gets mapped to `cam{N}` format (cam0, cam1, etc.)
-- Camera device order determines mapping
-- Build TensorRT engine with maximum intended camera count
-
-### Memory Management
-- Pipeline uses NVMM memory for efficient GPU-CPU transfers
-- Frame extraction follows NVIDIA's recommended practices
-- Automatic cleanup on script termination
-
-## 🛠️ Development
-
-### Adding Custom Post-Processing
-Modify the `pgie_src_pad_buffer_probe` function in deepstream_demux.py to add custom detection logic.
-
-### Extending Class Support
-1. Update `CLASS_NAMES` dictionary in structured_saver_1.py
-2. Modify `num-detected-classes` in config file
-3. Update any class-specific filtering logic
-
-### Custom Output Formats
-Extend `InferenceSaver` class to support additional output formats beyond CSV and YOLO.
+- **Custom post-processing** — extend `pgie_src_pad_buffer_probe` in `deepstream_demux.py`.
+- **New output formats** — extend `InferenceSaver` in `structured_saver.py` (CSV and YOLO are built in).
+- **Frame handling** — clean-frame capture lives in `frame_grabber.py` (thread-safe, per-stream).
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Released under the [MIT License](LICENSE).
 
 ## 📚 Citation
 
-If you use this pipeline in your research, please cite:
-
 ```bibtex
-@software{deepstream_data_collection_pipeline,
-  title={DeepStream Data Collection Pipeline},
-  author={Your Name},
-  year={2024},
-  url={https://github.com/your-username/deepstream-data-collection-pipeline}
+@software{deepstream_yolo_data_collection_toolkit,
+  title  = {DeepStream YOLO Data Collection Toolkit},
+  author = {Gautham Ramkumar},
+  year   = {2025},
+  url    = {https://github.com/Gautham-Ramkumar03/deepstream-yolo-data-collection-toolkit}
 }
 ```
 
-## 🤝 Contributing
+## 🙏 Acknowledgements
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-## 📞 Support
-
-For issues and questions:
-- Open a GitHub issue for bugs and feature requests
-- Check NVIDIA DeepStream documentation for platform-specific issues
-- Verify hardware compatibility with DeepStream 7.0+
+The `nvdsinfer_custom_impl_Yolo` parser builds on the community DeepStream-YOLO work for
+running Ultralytics YOLO models inside the DeepStream SDK.

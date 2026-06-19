@@ -64,7 +64,7 @@ Edit `scripts/ds_demux_pgie_config.txt`:
 onnx-file=../models/yolo11m.pt.onnx
 
 # Comment out engine file for first run (will be auto-generated)
-# model-engine-file=/home/user/path/to/deepstream-data-collection-pipeline/models/yolo11m.pt.onnx_b3_gpu0_fp16.engine
+# model-engine-file=../models/yolo11m.pt.onnx_b3_gpu0_fp16.engine
 
 # YOLOv11m uses COCO dataset (80 classes)
 num-detected-classes=80
@@ -88,9 +88,9 @@ After successful first run, update `ds_demux_pgie_config.txt`:
 
 ```ini
 [property]
-onnx-file=/home/user/path/to/deepstream-data-collection-pipeline/models/yolo11m.pt.onnx
+onnx-file=../models/yolo11m.pt.onnx
 # Uncomment and update engine file path
-model-engine-file=/home/user/path/to/deepstream-data-collection-pipeline/models/yolo11m.pt.onnx_b1_gpu0_fp16.engine
+model-engine-file=../models/yolo11m.pt.onnx_b1_gpu0_fp16.engine
 num-detected-classes=80
 ```
 
@@ -182,7 +182,7 @@ yolo11m.pt.onnx_b5_gpu0_fp32.engine    # 5 cameras, GPU 0, FP32
 
 3. **Update Class Configuration**:
    
-   Edit `scripts/structured_saver_1.py`:
+   Edit `scripts/structured_saver.py`:
    ```python
    # Update with your custom classes
    CLASS_NAMES = {
